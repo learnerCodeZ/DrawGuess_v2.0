@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>你画我猜 - 首页</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <!-- 导航 -->
+    <nav class="navbar">
+        <div class="navbar-brand">🎨 你画我猜</div>
+        <div class="navbar-right">
+            <span>欢迎, <span id="navbarUser"></span></span>
+            <a id="adminLink" href="/admin.html" style="display:none;color:#1890ff;font-size:13px;">管理后台</a>
+            <button class="btn btn-sm btn-danger" onclick="logout()">退出</button>
+        </div>
+    </nav>
+
+    <div class="container" style="display:flex;gap:20px;flex-wrap:wrap;">
+        <!-- 左侧：房间列表 -->
+        <div class="card" style="flex:1;min-width:300px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3>🏠 房间</h3>
+                <button class="btn btn-sm btn-primary" onclick="createRoom()">创建房间</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+                <input type="text" id="joinRoomId" class="form-input" placeholder="输入6位房间号" maxlength="6" style="flex:1;">
+                <button class="btn btn-sm btn-success" onclick="joinRoom()">加入</button>
+            </div>
+            <div style="margin-top:16px;">
+                <h4 style="font-size:14px;color:#666;margin-bottom:8px;">在线房间</h4>
+                <div id="roomList"><p style="color:#999;font-size:13px;">加载中...</p></div>
+            </div>
+        </div>
+
+        <!-- 中间：好友 -->
+        <div class="card" style="flex:1;min-width:250px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3>👥 好友</h3>
+                <button class="btn btn-sm btn-default" onclick="showSearchUser()">+ 添加</button>
+            </div>
+            <div style="margin-bottom:12px;">
+                <a href="javascript:void(0)" onclick="showFriendRequests()" style="font-size:13px;">好友请求 <span id="requestBadge" class="badge badge-red" style="display:none;">0</span></a>
+            </div>
+            <div id="friendList"><p style="color:#999;font-size:13px;">加载中...</p></div>
+        </div>
+
+        <!-- 右侧：排行榜 -->
+        <div class="card" style="flex:1;min-width:250px;">
+            <h3 style="margin-bottom:16px;">🏆 排行榜</h3>
+            <div id="leaderboardList"><p style="color:#999;font-size:13px;">加载中...</p></div>
+        </div>
+    </div>
+
+    <!-- 搜索用户弹窗 -->
+    <div id="searchModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <span>添加好友</span>
+                <button class="modal-close" onclick="closeModal('searchModal')">&times;</button>
+            </div>
+            <div class="form-group">
+                <input type="text" id="searchKeyword" class="form-input" placeholder="搜索昵称或手机号" onkeydown="if(event.key==='Enter')searchUser()">
+                <button class="btn btn-sm btn-primary" onclick="searchUser()" style="margin-top:8px;">搜索</button>
+            </div>
+            <div id="searchResults" style="margin-top:12px;"></div>
+        </div>
+    </div>
+
+    <!-- 好友请求弹窗 -->
+    <div id="requestsModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <span>好友请求</span>
+                <button class="modal-close" onclick="closeModal('requestsModal')">&times;</button>
+            </div>
+            <div id="requestsList"></div>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script>
+        let rooms = [];
+        let friends = [];
+
+        // ---- 初始化 ----
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!api.isLoggedIn()) return window.location.href = '/index.html';
+            loadNavbar();
+            loadRooms();
+            loadFriends();
+            loadLeaderboard();
+            loadRequestBadge();
+        });
+
+        function logout() {
+            api.clearAuth();
+            window.location.href = '/index.html';
+        }
+
+        // ---- 房间 ----
+        async function loadRooms() {
+            try {
+                rooms = await api.get('/api/admin/rooms') || [];
+            } catch { rooms = []; }
+            renderRooms();
+        }
+
+        function renderRooms() {
+            const el = document.getElementById('roomList');
+            if (!rooms.length) {
+                el.innerHTML = '<p style="color:#999;font-size:13px;">暂无在线房间，来创建第一个吧！</p>';
+                return;
+            }
+            el.innerHTML = rooms.map(r => {
+                const stateMap = { WAITING: '等待中', PLAYING: '游戏中', PAUSED: '已暂停', ENDED: '已结束' };
+                const stateBadge = { WAITING: 'badge-green', PLAYING: 'badge-blue', PAUSED: 'badge-orange', ENDED: 'badge-grey' };
+                return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f5f5f5;">
+                    <div>
+                        <strong>${r.roomId}</strong>
+                        <span class="badge ${stateBadge[r.state] || 'badge-grey'}" style="margin-left:8px;">${stateMap[r.state] || r.state}</span>
+                        <div style="font-size:12px;color:#999;margin-top:2px;">
+                            ${r.creatorNickname || '?'} · ${(r.members||[]).length}人
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="location.href='/room.html?roomId=${r.roomId}'">加入</button>
+                </div>`;
+            }).join('');
+        }
+
+        async function createRoom() {
+            try {
+                const room = await api.post('/api/rooms');
+                window.location.href = '/room.html?roomId=' + room.roomId;
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function joinRoom() {
+            const roomId = document.getElementById('joinRoomId').value.trim();
+            if (!roomId || roomId.length !== 6) return showToast('请输入6位房间号', 'error');
+            window.location.href = '/room.html?roomId=' + roomId;
+        }
+
+        // ---- 好友 ----
+        async function loadFriends() {
+            try {
+                friends = await api.get('/api/friends') || [];
+            } catch { friends = []; }
+            renderFriends();
+        }
+
+        function renderFriends() {
+            const el = document.getElementById('friendList');
+            if (!friends.length) {
+                el.innerHTML = '<p style="color:#999;font-size:13px;">暂无好友，搜索添加吧！</p>';
+                return;
+            }
+            el.innerHTML = friends.map(f => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f5f5f5;">
+                <div>
+                    <span class="online-dot ${f.online ? 'online' : 'offline'}"></span>
+                    <strong>${f.nickname}</strong>
+                    <span style="font-size:12px;color:#999;margin-left:8px;">${f.totalScore}分</span>
+                </div>
+                <button class="btn btn-sm btn-danger" onclick="deleteFriend(${f.id})">删除</button>
+            </div>`).join('');
+        }
+
+        async function deleteFriend(friendId) {
+            if (!confirm('确定删除好友？')) return;
+            try {
+                await api.del('/api/friends/' + friendId);
+                showToast('已删除好友', 'success');
+                loadFriends();
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function loadRequestBadge() {
+            try {
+                const reqs = await api.get('/api/friends/requests') || [];
+                const badge = document.getElementById('requestBadge');
+                if (reqs.length > 0) {
+                    badge.textContent = reqs.length;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            } catch {}
+        }
+
+        function showSearchUser() {
+            document.getElementById('searchModal').classList.add('show');
+            document.getElementById('searchResults').innerHTML = '';
+        }
+
+        async function searchUser() {
+            const keyword = document.getElementById('searchKeyword').value.trim();
+            if (!keyword) return showToast('请输入搜索关键词', 'error');
+            try {
+                const results = await api.get('/api/friends/search?q=' + encodeURIComponent(keyword));
+                const el = document.getElementById('searchResults');
+                if (!results.length) {
+                    el.innerHTML = '<p style="color:#999;font-size:13px;">未找到用户</p>';
+                    return;
+                }
+                el.innerHTML = results.map(u => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f5f5f5;">
+                    <span>${u.nickname} (${u.phone})</span>
+                    <button class="btn btn-sm btn-primary" onclick="sendFriendRequest(${u.id})">添加</button>
+                </div>`).join('');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        async function sendFriendRequest(friendId) {
+            try {
+                await api.post('/api/friends/request', { friendId });
+                showToast('好友请求已发送', 'success');
+                document.getElementById('searchModal').classList.remove('show');
+            } catch (e) {
+                showToast(e.message, 'error');
+            }
+        }
+
+        function showFriendRequests() {
+            document.getElementById('requestsModal').classList.add('show');
+            loadRequestsList();
+        }
+
+        async function loadRequestsList() {
+            try {
+                const reqs = await api.get('/api/friends/requests') || [];
+                const el = document.getElementById('requestsList');
+                if (!reqs.length) {
+                    el.innerHTML = '<p style="color:#999;font-size:13px;">暂无好友请求</p>';
+                    return;
+                }
+                el.innerHTML = reqs.map(r => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f5f5f5;">
+                    <span><strong>${r.fromNickname}</strong> (${r.fromPhone})</span>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-sm btn-success" onclick="acceptRequest(${r.id})">同意</button>
+                        <button class="btn btn-sm btn-default" onclick="rejectRequest(${r.id})">拒绝</button>
+                    </div>
+                </div>`).join('');
+            } catch {}
+        }
+
+        async function acceptRequest(requestId) {
+            try {
+                await api.post('/api/friends/accept', { requestId });
+                showToast('已同意', 'success');
+                loadRequestsList();
+                loadFriends();
+                loadRequestBadge();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function rejectRequest(requestId) {
+            try {
+                await api.post('/api/friends/reject', { requestId });
+                showToast('已拒绝', 'info');
+                loadRequestsList();
+                loadRequestBadge();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        // ---- 排行榜 ----
+        async function loadLeaderboard() {
+            try {
+                const list = await api.get('/api/leaderboard') || [];
+                const el = document.getElementById('leaderboardList');
+                if (!list.length) {
+                    el.innerHTML = '<p style="color:#999;font-size:13px;">暂无数据</p>';
+                    return;
+                }
+                const medals = ['🥇', '🥈', '🥉'];
+                el.innerHTML = list.map((u, i) => `<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f5f5f5;font-size:14px;">
+                    <span style="width:30px;text-align:center;font-weight:700;">${medals[i] || (i+1)}</span>
+                    <span style="flex:1;">${u.nickname}</span>
+                    <span style="color:#1890ff;font-weight:600;">${u.totalScore}分</span>
+                </div>`).join('');
+            } catch {}
+        }
+
+        // ---- 工具 ----
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+    </script>
+</body>
+</html>

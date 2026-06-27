@@ -1,0 +1,30 @@
+# Maven
+draw-guess-server/target/
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Environment / secrets
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+logs/
+
+# Docker
+draw-guess-server/target/

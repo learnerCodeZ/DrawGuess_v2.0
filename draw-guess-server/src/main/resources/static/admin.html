@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>你画我猜 - 管理后台</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .stat-card { background: #fff; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .stat-card .num { font-size: 28px; font-weight: 700; color: #1890ff; }
+        .stat-card .label { font-size: 13px; color: #999; margin-top: 4px; }
+        .admin-page { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .word-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f5f5f5; font-size: 14px; }
+        .inline-form { display: flex; gap: 8px; margin-bottom: 12px; }
+        .inline-form input { flex: 1; height: 36px; }
+        .inline-form button { height: 36px; }
+        .batch-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 8px 12px; background: #f6f8fa; border-radius: 6px; }
+        .batch-bar .selected-count { font-size: 13px; color: #666; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">🎨 你画我猜 管理后台</div>
+        <div class="navbar-right">
+            <span id="navbarUser"></span>
+            <a href="/home.html" style="font-size:13px;">← 返回首页</a>
+            <button class="btn btn-sm btn-danger" onclick="logout()">退出</button>
+        </div>
+    </nav>
+
+    <div class="admin-page">
+        <!-- 统计 -->
+        <div class="stats-grid" id="statsGrid"></div>
+
+        <!-- 标签页 -->
+        <div class="tabs">
+            <div class="tab-item active" data-tab="users">👤 用户管理</div>
+            <div class="tab-item" data-tab="words">📝 词库管理</div>
+            <div class="tab-item" data-tab="rooms">🏠 房间管理</div>
+        </div>
+
+        <!-- 用户管理 -->
+        <div class="tab-content active" id="tab-users">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <h3>所有用户</h3>
+                    <div>
+                        <button class="btn btn-sm btn-default" onclick="loadUsers('pending')">待审核</button>
+                        <button class="btn btn-sm btn-default" onclick="loadUsers('all')">全部</button>
+                        <button class="btn btn-sm btn-default" onclick="loadUsers('rejected')">已拒绝</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="table" id="userTable">
+                        <thead><tr><th>ID</th><th>手机号</th><th>昵称</th><th>角色</th><th>状态</th><th>分数</th><th>操作</th></tr></thead>
+                        <tbody id="userTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 词库管理 -->
+        <div class="tab-content" id="tab-words">
+            <div class="card">
+                <h3 style="margin-bottom:16px;">词库管理</h3>
+                <div class="inline-form">
+                    <input type="text" id="wordInput" class="form-input" placeholder="输入新词语" onkeydown="if(event.key==='Enter')addWord()">
+                    <button class="btn btn-sm btn-primary" onclick="addWord()">添加</button>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <textarea id="batchWordInput" class="form-input" rows="3" placeholder="批量添加，每行一个词语"></textarea>
+                    <button class="btn btn-sm btn-primary" onclick="batchAddWords()" style="margin-top:8px;">批量添加</button>
+                </div>
+                <div class="batch-bar">
+                    <label style="font-size:13px;cursor:pointer;"><input type="checkbox" id="selectAllWords" onchange="toggleSelectAll()"> 全选</label>
+                    <span class="selected-count" id="selectedCount">已选 0 项</span>
+                    <button class="btn btn-sm btn-danger" onclick="batchDeleteWords()" id="batchDeleteBtn" disabled>批量删除</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="table" id="wordTable">
+                        <thead><tr><th><input type="checkbox" id="selectAllWordsHead" onchange="toggleSelectAll()"></th><th>ID</th><th>词语</th><th>类型</th><th>操作</th></tr></thead>
+                        <tbody id="wordTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 房间管理 -->
+        <div class="tab-content" id="tab-rooms">
+            <div class="card">
+                <h3 style="margin-bottom:16px;">在线房间</h3>
+                <table class="table" id="roomTable">
+                    <thead><tr><th>房间号</th><th>房主</th><th>成员数</th><th>状态</th><th>操作</th></tr></thead>
+                    <tbody id="roomTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!api.isLoggedIn()) return window.location.href = '/index.html';
+            if (!api.isAdmin()) { showToast('权限不足', 'error'); return window.location.href = '/home.html'; }
+            loadNavbar();
+            loadStats();
+            loadUsers('all');
+            loadWords();
+            loadRooms();
+            initTabs();
+        });
+
+        function logout() { api.clearAuth(); window.location.href = '/index.html'; }
+
+        // ---- 标签页切换 ----
+        function initTabs() {
+            document.querySelectorAll('.tab-item').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+                });
+            });
+        }
+
+        // ---- 统计 ----
+        async function loadStats() {
+            try {
+                const stats = await api.get('/api/admin/stats');
+                const grids = [
+                    { label: '总用户', num: stats.totalUsers },
+                    { label: '待审核', num: stats.pendingUsers },
+                    { label: '已通过', num: stats.approvedUsers },
+                    { label: '活跃房间', num: stats.activeRooms },
+                    { label: '游戏中', num: stats.playingGames },
+                    { label: '词库数', num: stats.totalWords },
+                    { label: '在线用户', num: stats.onlineUsers }
+                ];
+                document.getElementById('statsGrid').innerHTML = grids.map(g =>
+                    `<div class="stat-card"><div class="num">${g.num}</div><div class="label">${g.label}</div></div>`
+                ).join('');
+            } catch {}
+        }
+
+        // ---- 用户管理 ----
+        async function loadUsers(type) {
+            let users;
+            try {
+                if (type === 'pending') users = await api.get('/api/admin/users/pending');
+                else if (type === 'rejected') users = await api.get('/api/admin/users/rejected');
+                else users = await api.get('/api/admin/users');
+            } catch { users = []; }
+
+            const roleMap = { USER: '用户', ADMIN: '管理员', SUPER_ADMIN: '超级管理员' };
+            const statusMap = { APPROVED: '已通过', PENDING: '待审核', REJECTED: '已拒绝' };
+            const statusClass = { APPROVED: 'badge-green', PENDING: 'badge-orange', REJECTED: 'badge-red' };
+
+            document.getElementById('userTableBody').innerHTML = users.map(u =>
+                `<tr>
+                    <td>${u.id}</td>
+                    <td>${u.phone}</td>
+                    <td>${u.nickname}</td>
+                    <td>${roleMap[u.role] || u.role}</td>
+                    <td><span class="badge ${statusClass[u.status] || 'badge-grey'}">${statusMap[u.status] || u.status}</span></td>
+                    <td>${u.totalScore}</td>
+                    <td>
+                        ${u.status === 'PENDING' ? `<button class="btn btn-sm btn-success" onclick="approveUser(${u.id})">通过</button>
+                        <button class="btn btn-sm btn-default" onclick="rejectUser(${u.id})">拒绝</button>` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">注销</button>
+                    </td>
+                </tr>`
+            ).join('');
+        }
+
+        async function approveUser(userId) {
+            try { await api.post('/api/admin/approve', { userId }); showToast('已通过', 'success'); loadUsers('pending'); loadStats(); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function rejectUser(userId) {
+            try { await api.post('/api/admin/reject', { userId }); showToast('已拒绝', 'info'); loadUsers('pending'); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function deleteUser(userId) {
+            if (!confirm('确定注销该用户？')) return;
+            try { await api.del('/api/admin/users/' + userId); showToast('已注销', 'success'); loadUsers('all'); loadStats(); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+
+        // ---- 词库管理 ----
+        let selectedWordIds = new Set();
+
+        function updateSelectedCount() {
+            document.getElementById('selectedCount').textContent = '已选 ' + selectedWordIds.size + ' 项';
+            document.getElementById('batchDeleteBtn').disabled = selectedWordIds.size === 0;
+        }
+
+        function toggleSelectAll() {
+            const checkboxes = document.querySelectorAll('.word-checkbox');
+            const allChecked = selectedWordIds.size === checkboxes.length && checkboxes.length > 0;
+            checkboxes.forEach(cb => {
+                const id = parseInt(cb.dataset.id);
+                if (allChecked) {
+                    cb.checked = false;
+                    selectedWordIds.delete(id);
+                } else {
+                    if (!cb.disabled) {
+                        cb.checked = true;
+                        selectedWordIds.add(id);
+                    }
+                }
+            });
+            updateSelectedCount();
+        }
+
+        function toggleWordSelect(id, cb) {
+            if (cb.checked) selectedWordIds.add(id);
+            else selectedWordIds.delete(id);
+            updateSelectedCount();
+        }
+
+        async function loadWords() {
+            selectedWordIds.clear();
+            updateSelectedCount();
+            try {
+                const words = await api.get('/api/admin/words') || [];
+                document.getElementById('wordTableBody').innerHTML = words.map(w =>
+                    `<tr>
+                        <td><input type="checkbox" class="word-checkbox" data-id="${w.id}" ${w.isDefault ? 'disabled title="默认词不可删"' : ''} onchange="toggleWordSelect(${w.id}, this)"></td>
+                        <td>${w.id}</td>
+                        <td>${w.word}</td>
+                        <td>${w.isDefault ? '<span class="badge badge-orange">默认</span>' : '<span class="badge badge-blue">自定义</span>'}</td>
+                        <td>${w.isDefault ? '<span style="color:#999;font-size:12px;">不可删</span>' :
+                            `<button class="btn btn-sm btn-danger" onclick="deleteWord(${w.id})">删除</button>`}</td>
+                    </tr>`
+                ).join('');
+            } catch {}
+        }
+
+        async function addWord() {
+            const word = document.getElementById('wordInput').value.trim();
+            if (!word) return showToast('请输入词语', 'error');
+            try {
+                await api.post('/api/admin/words', { word });
+                showToast('添加成功', 'success');
+                document.getElementById('wordInput').value = '';
+                loadWords();
+                loadStats();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function batchAddWords() {
+            const text = document.getElementById('batchWordInput').value.trim();
+            if (!text) return showToast('请输入词语', 'error');
+            const words = text.split('\n').map(w => w.trim()).filter(w => w);
+            if (!words.length) return showToast('请输入词语', 'error');
+            try {
+                await api.post('/api/admin/words/batch', { words });
+                showToast('批量添加成功', 'success');
+                document.getElementById('batchWordInput').value = '';
+                loadWords();
+                loadStats();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function deleteWord(wordId) {
+            if (!confirm('确定删除该词语？')) return;
+            try { await api.del('/api/admin/words/' + wordId); showToast('已删除', 'success'); loadWords(); loadStats(); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function batchDeleteWords() {
+            if (selectedWordIds.size === 0) return showToast('请先选择词语', 'error');
+            if (!confirm('确定删除选中的 ' + selectedWordIds.size + ' 个词语？（默认词不会被删除）')) return;
+            try {
+                await api.request('DELETE', '/api/admin/words/batch', { wordIds: Array.from(selectedWordIds) });
+                showToast('批量删除成功', 'success');
+                loadWords();
+                loadStats();
+            } catch (e) { showToast(e.message, 'error'); }
+        }
+
+        // ---- 房间管理 ----
+        async function loadRooms() {
+            try {
+                const rooms = await api.get('/api/admin/rooms') || [];
+                const stateMap = { WAITING: '等待中', PLAYING: '游戏中', PAUSED: '已暂停', ENDED: '已结束' };
+                const stateBadge = { WAITING: 'badge-green', PLAYING: 'badge-blue', PAUSED: 'badge-orange' };
+
+                document.getElementById('roomTableBody').innerHTML = rooms.map(r =>
+                    `<tr>
+                        <td><strong>${r.roomId}</strong></td>
+                        <td>${r.creatorNickname || '?'}</td>
+                        <td>${(r.members||[]).length}</td>
+                        <td><span class="badge ${stateBadge[r.state] || 'badge-grey'}">${stateMap[r.state] || r.state}</span></td>
+                        <td>
+                            ${r.state === 'PLAYING' || r.state === 'WAITING' ?
+                                `<button class="btn btn-sm btn-warning" onclick="pauseRoom('${r.roomId}')" style="background:#fa8c16;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;">暂停</button>` : ''}
+                            ${r.state === 'PAUSED' ?
+                                `<button class="btn btn-sm btn-primary" onclick="resumeRoom('${r.roomId}')">恢复</button>` : ''}
+                            <button class="btn btn-sm btn-danger" onclick="dismissRoom('${r.roomId}')">解散</button>
+                        </td>
+                    </tr>`
+                ).join('');
+            } catch {}
+        }
+
+        async function pauseRoom(roomId) {
+            if (!confirm('确定暂停房间 ' + roomId + '？')) return;
+            try { await api.post('/api/admin/rooms/' + roomId + '/pause'); showToast('已暂停', 'success'); loadRooms(); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function resumeRoom(roomId) {
+            try { await api.post('/api/admin/rooms/' + roomId + '/resume'); showToast('已恢复', 'success'); loadRooms(); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+
+        async function dismissRoom(roomId) {
+            if (!confirm('确定解散房间 ' + roomId + '？')) return;
+            try { await api.post('/api/admin/rooms/' + roomId + '/dismiss'); showToast('已解散', 'success'); loadRooms(); loadStats(); }
+            catch (e) { showToast(e.message, 'error'); }
+        }
+    </script>
+</body>
+</html>
