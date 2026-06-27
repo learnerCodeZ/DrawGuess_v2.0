@@ -157,6 +157,14 @@
         </div>
     </div>
 
+    <!-- 回合间隔总结弹窗 -->
+    <div id="roundBreakOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:360px;max-width:90vw;">
+            <div style="text-align:center;font-size:18px;font-weight:700;margin-bottom:16px;">📊 回合总结</div>
+            <div id="breakRankings"></div>
+        </div>
+    </div>
+
     <script src="/js/api.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
@@ -351,15 +359,23 @@
                     addLog('🎮 游戏开始！共 ' + data.totalRounds + ' 回合');
                     break;
                 case 'round_start':
-                    isPainter = (data.painterId === currentUser.id);
+                    isPainter = (data.painterId == currentUser.id);
                     updateRoundInfo(data);
                     document.getElementById('answerLog').innerHTML = '';
-                    addLog('🖌️ 第 ' + data.roundNumber + '/' + data.totalRounds + ' 回合 - ' + data.painterNickname + ' 作画');
-                    if (!isPainter) {
+                    // 清空画布
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    undoStack = [];
+                    // 画家显示词语，其他人显示下划线
+                    if (isPainter) {
+                        document.getElementById('wordHintDisplay').textContent = '你的词语: ' + data.word;
+                    } else {
                         document.getElementById('wordHintDisplay').textContent = '_'.repeat(data.wordLength);
                     }
                     document.getElementById('answerArea').style.display = isPainter ? 'none' : '';
+                    document.getElementById('canvasWatermark').textContent = '';
+                    document.getElementById('roundBreakOverlay').style.display = 'none';
                     toolVisibility();
+                    addLog('🖌️ 第 ' + data.roundNumber + '/' + data.totalRounds + ' 回合 - ' + data.painterNickname + ' 作画');
                     break;
                 case 'tick':
                     updateTimer(data.timeLeft);
@@ -380,10 +396,16 @@
                     }
                     break;
                 case 'round_end':
-                    addLog('⏰ 回合结束！答案: ' + data.word);
                     gamePlaying = false;
                     isPainter = false;
                     toolVisibility();
+                    // 清空画布
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    undoStack = [];
+                    addLog('⏰ 回合结束！答案: ' + data.word);
+                    break;
+                case 'round_break':
+                    showRoundBreak(data);
                     break;
                 case 'game_end':
                     gamePlaying = false;
@@ -446,7 +468,9 @@
         function updateControls() {
             if (!roomInfo) return;
             const isCreator = roomInfo.creatorId === currentUser.id;
+            const controls = document.getElementById('gameControls');
             const startBtn = document.getElementById('startGameBtn');
+            controls.style.display = (isCreator && roomInfo.state === 'WAITING') ? '' : 'none';
             startBtn.style.display = (isCreator && roomInfo.state === 'WAITING') ? '' : 'none';
 
             // 游戏中显示答题区
@@ -507,6 +531,42 @@
             stompClient.send('/app/submit_answer', {}, JSON.stringify({ roomId, answer }));
             input.value = '';
             document.getElementById('answerLog').innerHTML += '<div class="wrong">你: ' + answer + '</div>';
+        }
+
+        // ---- 回合间隔 ----
+        function showRoundBreak(data) {
+            const hint = document.getElementById('wordHintDisplay');
+            const timer = document.getElementById('timerDisplay');
+            document.getElementById('answerArea').style.display = 'none';
+
+            // 显示回合总结弹窗
+            const rankings = data.rankings || [];
+            const medals = ['🥇', '🥈', '🥉'];
+            let rankHtml = rankings.map((p, i) =>
+                `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:14px;">
+                    <div><span style="margin-right:6px;">${medals[i] || (i+1)+'.'}</span> ${p.nickname}</div>
+                    <div><span style="color:#1890ff;font-weight:600;">+${p.roundScore}</span> <span style="color:#999;font-size:12px;">(总${p.totalScore})</span></div>
+                </div>`
+            ).join('');
+
+            const overlay = document.getElementById('roundBreakOverlay');
+            document.getElementById('breakRankings').innerHTML = rankHtml;
+            overlay.style.display = 'flex';
+
+            let remaining = data.breakSeconds;
+            timer.textContent = remaining + 's';
+            timer.className = 'timer running';
+            hint.textContent = '回合总结';
+
+            const breakTimer = setInterval(() => {
+                remaining--;
+                timer.textContent = remaining + 's';
+                if (remaining <= 0) {
+                    clearInterval(breakTimer);
+                    overlay.style.display = 'none';
+                    hint.textContent = '';
+                }
+            }, 1000);
         }
 
         // ---- 结果弹窗 ----

@@ -40,6 +40,7 @@ public class GameServiceImpl implements GameService {
     private static final Logger log = LoggerFactory.getLogger(GameServiceImpl.class);
     private static final int MIN_PLAYERS = 3;
     private static final int ROUND_TIME_SECONDS = 30;
+    private static final int ROUND_BREAK_SECONDS = 10;
     private static final int SCORE_FOR_CORRECT = 1;
 
     /** 房间ID → 游戏上下文（内存维护） */
@@ -145,15 +146,10 @@ public class GameServiceImpl implements GameService {
                 "totalRounds", ctx.getTotalRounds(),
                 "painterId", painterId,
                 "painterNickname", getNickname(painterId),
+                "word", ctx.getCurrentWord(),
                 "wordLength", ctx.getCurrentWord().length(),
                 "timeLeft", ROUND_TIME_SECONDS
         ));
-
-        // 给画家单独发完整词
-        messagingTemplate.convertAndSendToUser(
-                painterId.toString(), "/queue/word",
-                WsMessage.event("round_word", Map.of("word", ctx.getCurrentWord()))
-        );
 
         log.info("回合开始: roomId={}, round={}/{}, painterId={}, word={}",
                 roomId, ctx.getCurrentRoundNumber(), ctx.getTotalRounds(), painterId, ctx.getCurrentWord());
@@ -237,11 +233,27 @@ public class GameServiceImpl implements GameService {
             throw new BusinessException(ResultCode.GAME_NOT_IN_PROGRESS);
         }
 
+        // 构建回合得分摘要（含昵称和总分）
+        List<Map<String, Object>> roundSummary = new ArrayList<>();
+        for (Map.Entry<Long, Integer> entry : ctx.getRoundScores().entrySet()) {
+            User user = userMapper.selectById(entry.getKey());
+            if (user == null) continue;
+            roundSummary.add(Map.of(
+                    "userId", entry.getKey(),
+                    "nickname", user.getNickname(),
+                    "totalScore", user.getTotalScore() + entry.getValue(),
+                    "roundScore", entry.getValue()
+            ));
+        }
+        // 按本局得分降序
+        roundSummary.sort((a, b) -> (int) b.get("roundScore") - (int) a.get("roundScore"));
+
         // 广播回合结束
         broadcast(roomId, "round_end", Map.of(
                 "roundNumber", ctx.getCurrentRoundNumber(),
                 "word", ctx.getCurrentWord(),
-                "scores", ctx.getRoundScores()
+                "painterNickname", getNickname(ctx.getCurrentPainterId()),
+                "rankings", roundSummary
         ));
 
         log.info("回合结束: roomId={}, round={}/{}, word={}",
@@ -252,8 +264,21 @@ public class GameServiceImpl implements GameService {
             endGame(roomId);
         } else {
             ctx.advanceRound();
-            // 自动开始下一回合
-            startRound(roomId);
+            // 10 秒间隔后自动开始下一回合
+            broadcast(roomId, "round_break", Map.of(
+                    "breakSeconds", ROUND_BREAK_SECONDS,
+                    "nextRoundNumber", ctx.getCurrentRoundNumber(),
+                    "totalRounds", ctx.getTotalRounds(),
+                    "rankings", roundSummary
+            ));
+            new Thread(() -> {
+                try {
+                    Thread.sleep(ROUND_BREAK_SECONDS * 1000L);
+                    startRound(roomId);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }).start();
         }
     }
 
